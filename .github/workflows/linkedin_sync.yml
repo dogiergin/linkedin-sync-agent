@@ -2,8 +2,8 @@ name: LinkedIn Activity Sync Agent
 
 on:
   schedule:
-    # Runs every day at 09:00 UTC (12:00 TRT)
-    - cron: "0 9 * * *"
+    # Runs every day at 17:00 UTC (20:00 Türkiye Saati)
+    - cron: "0 17 * * *"
   workflow_dispatch:
     inputs:
       force:
