@@ -1,0 +1,24 @@
+# Environment variables
+.env
+
+# Playwright & Session data
+data/session.json
+data/*.png
+data/*.html
+
+# Logs
+logs/*
+!logs/.gitkeep
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environment
+.venv/
+venv/
+ENV/
