@@ -6,6 +6,7 @@ Bundan sonra üreteceğin veya düzenleyeceğin tüm LinkedIn gönderilerine aş
    - Gönderinin ilk satırı mutlaka tek ve net bir ana başlık cümlesi olmalı.
    - Sonuna asla nokta konulmaz.
    - Örnek: `🚀 Yapay Zeka Çağının Teknik Sözlüğü | Bölüm 1/3`
+   - **BÖLÜM KURALI:** Eğer kullanıcı orijinal gönderide açıkça bir bölüm numarası yazmadıysa (örneğin "Bölüm 1/3" gibi), başlığa KESİNLİKLE yapay bir bölüm ibaresi ("Bölüm 0" gibi) EKLENMEZ. Bölüm kısmı yalnızca kullanıcı orijinal metinde belirtmişse yer alır.
 
 2. **ALT BAŞLIK (2. SATIR):**
    - Varsa konunun kapsamını veya alt başlığını 2. satırda iki yıldız arasına alarak kalın (bold) yaz.
