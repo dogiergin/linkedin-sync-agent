@@ -9,19 +9,17 @@ class PostExtractor:
 
     @staticmethod
     def extract_hashtags(text: str) -> List[str]:
-        """Extracts hashtags without the '#' prefix."""
+        """Extracts hashtags without the '#' prefix, uppercase with underscores."""
         if not text:
             return []
-        # Support alphanumeric and unicode hashtags (e.g. Turkish characters)
         raw_tags = re.findall(r"#([^\s!@#$%^&*()+=\[\]{};:'\",.<>?/\\|]+)", text)
-        # Deduplicate while maintaining order
         seen = set()
         deduped = []
         for tag in raw_tags:
-            tag_clean = tag.strip()
-            if tag_clean and tag_clean.lower() not in seen:
-                seen.add(tag_clean.lower())
-                deduped.append(tag_clean)
+            clean = re.sub(r"[^\w\d_]", "_", tag.strip()).upper().strip("_")
+            if clean and clean not in seen:
+                seen.add(clean)
+                deduped.append(clean)
         return deduped
 
     @staticmethod
@@ -64,6 +62,24 @@ class PostExtractor:
 
         return ""
 
+    @staticmethod
+    def normalize_date(raw_date: str) -> str:
+        """Normalizes date according to rule 6: 'Bugün', '1 gün'-'6 gün', or '1 hafta'."""
+        if not raw_date:
+            return "Bugün"
+        str_val = raw_date.strip().lower()
+        if any(m in str_val for m in ["eylül", "september", "ağustos", "august", "temmuz", "july", "haziran", "june", "mayıs", "may", "nisan", "april", "mart", "march", "şubat", "february", "ocak", "january"]):
+            return "1 hafta"
+        if str_val in ["bugün", "today"] or any(w in str_val for w in ["dakika", "saat", "hour", "min", "just now", "şimdi", "az önce"]):
+            return "Bugün"
+        m = re.search(r"(\d+)\s*(gün|g|d|day)", str_val)
+        if m:
+            days = int(m.group(1))
+            return f"{days} gün" if days <= 6 else "1 hafta"
+        if any(w in str_val for w in ["hafta", "week", "ay", "month", "yıl", "year"]):
+            return "1 hafta"
+        return "Bugün"
+
     @classmethod
     def parse_post(
         cls,
@@ -78,7 +94,7 @@ class PostExtractor:
         content = cls.clean_content(raw_content)
         url = cls.standardize_url(raw_url, urn)
         hashtags = cls.extract_hashtags(content)
-        date = raw_date.strip() if raw_date else datetime.now(timezone.utc).isoformat()
+        date = cls.normalize_date(raw_date)
 
         logger.info(f"Parsed post: URL={url} | Date={date} | Tags={len(hashtags)} | Content length={len(content)}")
 
