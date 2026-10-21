@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import random
+import re
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -14,6 +15,11 @@ from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page, 
 from loguru import logger
 from src.config import config
 from src.extractor import PostExtractor
+
+# Relative post age as LinkedIn shows it, e.g. "3 gün", "2 hafta", "5h", "1w"
+RELATIVE_TIME_RE = re.compile(
+    r"^\d+\s*(dk|dakika|sa|saat|gün|g|hafta|ay|yıl|m|min|h|hr|d|w|mo|yr)\b", re.IGNORECASE
+)
 
 
 
@@ -212,121 +218,9 @@ class LinkedInScraper:
                 page.evaluate("window.scrollBy(0, 500);")
                 time.sleep(random.uniform(1.5, 2.5))
 
-                # Candidate selectors for post cards
-                post_card_selectors = [
-                    ".feed-shared-update-v2",
-                    "div[data-urn*='activity']",
-                    "div[data-id*='activity']",
-                    "div.profile-creator-shared-feed-update__container",
-                    ".scaffold-finite-scroll__content > div",
-                    "div.feed-shared-update-v2__content",
-                    "li.profile-creator-shared-feed-update__container",
-                ]
-
-                post_element = None
-                for selector in post_card_selectors:
-                    elements = page.query_selector_all(selector)
-                    for el in elements:
-                        # Make sure element has text or substantial content
-                        text = el.inner_text().strip()
-                        if len(text) > 20:
-                            post_element = el
-                            logger.info(f"Found post card matching selector: {selector}")
-                            break
-                    if post_element:
-                        break
-
-                if not post_element:
-                    logger.error("Could not locate any post elements on the activity page.")
+                parsed_post = self._extract_post(page)
+                if not parsed_post:
                     self._save_debug_artifacts(page)
-                    browser.close()
-                    return None
-
-                # Try to expand "...see more" button if present inside the post
-                see_more_selectors = [
-                    "button.feed-shared-inline-show-more-text__see-more-less-toggle",
-                    "button[aria-label*='more']",
-                    "button[aria-label*='fazla']",
-                    "button:has-text('see more')",
-                    "button:has-text('daha fazla')",
-                ]
-                for btn_sel in see_more_selectors:
-                    try:
-                        btn = post_element.query_selector(btn_sel)
-                        if btn and btn.is_visible():
-                            btn.click(timeout=2000)
-                            time.sleep(0.5)
-                            break
-                    except Exception:
-                        pass
-
-                # Extract Text Content
-                content_selectors = [
-                    ".feed-shared-update-v2__description",
-                    ".update-components-text",
-                    ".feed-shared-text",
-                    ".feed-shared-inline-show-more-text",
-                    "span.break-words",
-                ]
-
-                raw_content = ""
-                for c_sel in content_selectors:
-                    c_el = post_element.query_selector(c_sel)
-                    if c_el:
-                        text = c_el.inner_text().strip()
-                        if text:
-                            raw_content = text
-                            break
-
-                if not raw_content:
-                    # Fallback to general post element inner text
-                    raw_content = post_element.inner_text()
-
-                # Extract URN / URL
-                urn = post_element.get_attribute("data-urn") or post_element.get_attribute("data-id") or ""
-                
-                raw_url = ""
-                # Search for direct link inside post
-                link_selectors = [
-                    "a[href*='/feed/update/urn:li:activity:']",
-                    "a[href*='/feed/update/']",
-                    "a[href*='linkedin.com/posts/']",
-                    "a.feed-shared-update-v2__sub-link",
-                    "a.app-aware-link[href*='activity']",
-                ]
-                for l_sel in link_selectors:
-                    link_el = post_element.query_selector(l_sel)
-                    if link_el:
-                        href = link_el.get_attribute("href")
-                        if href:
-                            raw_url = href
-                            break
-
-                # Extract Date / Time
-                raw_date = ""
-                date_selectors = [
-                    "time",
-                    ".update-components-actor__sub-description",
-                    ".feed-shared-actor__sub-description",
-                    "span.visually-hidden",
-                ]
-                for d_sel in date_selectors:
-                    date_el = post_element.query_selector(d_sel)
-                    if date_el:
-                        dt_text = date_el.inner_text().strip()
-                        # Often contains "1w • Edited • " - grab the first part
-                        if dt_text:
-                            raw_date = dt_text.split("•")[0].strip()
-                            break
-
-                # Parse into standard payload
-                parsed_post = PostExtractor.parse_post(
-                    raw_content=raw_content,
-                    raw_url=raw_url,
-                    raw_date=raw_date,
-                    urn=urn,
-                )
-
                 browser.close()
                 return parsed_post
 
@@ -335,6 +229,147 @@ class LinkedInScraper:
                 self._save_debug_artifacts(page)
                 browser.close()
                 return None
+
+    def _extract_post(self, page: Page) -> Optional[Dict[str, Any]]:
+        """Finds the newest post card on a loaded activity page and parses it.
+
+        LinkedIn's October 2026 markup uses obfuscated class names, so the stable hooks are
+        role / componentkey / data-testid attributes; the older class selectors stay as
+        fallbacks."""
+        # Candidate selectors for post cards
+        post_card_selectors = [
+            "div[role='listitem'][componentkey^='update-card']",
+            ".feed-shared-update-v2",
+            "div[data-urn*='activity']",
+            "div[data-id*='activity']",
+            "div.profile-creator-shared-feed-update__container",
+            ".scaffold-finite-scroll__content > div",
+            "div.feed-shared-update-v2__content",
+            "li.profile-creator-shared-feed-update__container",
+        ]
+
+        post_element = None
+        for selector in post_card_selectors:
+            elements = page.query_selector_all(selector)
+            for el in elements:
+                # Make sure element has text or substantial content
+                text = el.inner_text().strip()
+                if len(text) > 20:
+                    post_element = el
+                    logger.info(f"Found post card matching selector: {selector}")
+                    break
+            if post_element:
+                break
+
+        if not post_element:
+            logger.error("Could not locate any post elements on the activity page.")
+            return None
+
+        # Try to expand "...see more" button if present inside the post
+        see_more_selectors = [
+            "button[data-testid='expandable-text-button']",
+            "button.feed-shared-inline-show-more-text__see-more-less-toggle",
+            "button[aria-label*='more']",
+            "button[aria-label*='fazla']",
+            "button:has-text('see more')",
+            "button:has-text('daha fazla')",
+        ]
+        for btn_sel in see_more_selectors:
+            try:
+                btn = post_element.query_selector(btn_sel)
+                if btn and btn.is_visible():
+                    btn.click(timeout=2000)
+                    time.sleep(0.5)
+                    break
+            except Exception:
+                pass
+
+        # Extract Text Content
+        content_selectors = [
+            "span[data-testid='expandable-text-box']",
+            ".feed-shared-update-v2__description",
+            ".update-components-text",
+            ".feed-shared-text",
+            ".feed-shared-inline-show-more-text",
+            "span.break-words",
+        ]
+
+        raw_content = ""
+        for c_sel in content_selectors:
+            c_el = post_element.query_selector(c_sel)
+            if c_el:
+                text = c_el.inner_text().strip()
+                if text:
+                    raw_content = text
+                    break
+
+        if not raw_content:
+            # Fallback to general post element inner text
+            raw_content = post_element.inner_text()
+
+        # The collapsed text box may still carry its "… daha fazla / … see more" toggle label
+        raw_content = re.sub(r"\s*…?\s*(daha fazla|see more)\s*$", "", raw_content.strip())
+
+        # Extract URN / URL
+        urn = post_element.get_attribute("data-urn") or post_element.get_attribute("data-id") or ""
+        if not urn:
+            # New markup has no data-urn; the activity id appears in links such as the
+            # post-analytics link (/analytics/post-summary/urn:li:activity:<id>/)
+            for a in post_element.query_selector_all("a[href*='urn:li:activity:']"):
+                m = re.search(r"urn:li:activity:\d+", a.get_attribute("href") or "")
+                if m:
+                    urn = m.group(0)
+                    break
+
+        raw_url = ""
+        # Search for direct link inside post
+        link_selectors = [
+            "a[href*='/feed/update/urn:li:activity:']",
+            "a[href*='/feed/update/']",
+            "a[href*='linkedin.com/posts/']",
+            "a.feed-shared-update-v2__sub-link",
+            "a.app-aware-link[href*='activity']",
+        ]
+        for l_sel in link_selectors:
+            link_el = post_element.query_selector(l_sel)
+            if link_el:
+                href = link_el.get_attribute("href")
+                if href:
+                    raw_url = href
+                    break
+
+        # Extract Date / Time
+        raw_date = ""
+        date_selectors = [
+            "time",
+            ".update-components-actor__sub-description",
+            ".feed-shared-actor__sub-description",
+            "span.visually-hidden",
+        ]
+        for d_sel in date_selectors:
+            date_el = post_element.query_selector(d_sel)
+            if date_el:
+                dt_text = date_el.inner_text().strip()
+                # Often contains "1w • Edited • " - grab the first part
+                if dt_text:
+                    raw_date = dt_text.split("•")[0].strip()
+                    break
+
+        if not raw_date:
+            # New markup: the relative time is a bare <p><span>3 gün</span></p>
+            for span in post_element.query_selector_all("p > span"):
+                dt_text = span.inner_text().strip()
+                if RELATIVE_TIME_RE.match(dt_text):
+                    raw_date = dt_text.split("•")[0].strip()
+                    break
+
+        # Parse into standard payload
+        return PostExtractor.parse_post(
+            raw_content=raw_content,
+            raw_url=raw_url,
+            raw_date=raw_date,
+            urn=urn,
+        )
 
     def _save_debug_artifacts(self, page: Page) -> None:
         """Saves screenshot and HTML dump for debugging scrape failures."""
