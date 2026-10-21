@@ -111,7 +111,7 @@ def run_sync_pipeline(force: bool = False, dry_run: bool = False, headless: Opti
         return False
 
 
-def test_webhook_connection() -> None:
+def test_webhook_connection() -> bool:
     """Sends a mock test payload to the webhook endpoint."""
     console.print(Panel.fit("[bold cyan]🧪 Testing Webhook Connection[/bold cyan]"))
     dispatcher = WebhookDispatcher()
@@ -127,6 +127,7 @@ def test_webhook_connection() -> None:
         console.print(f"[bold green]✅ Webhook bağlantı testi başarılı! (HTTP {status_code})[/bold green]")
     else:
         console.print(f"[bold red]❌ Webhook bağlantı testi başarısız! (HTTP {status_code}) - {response_text}[/bold red]")
+    return success
 
 
 def start_scheduler(force: bool = False, headless: Optional[bool] = None) -> None:
@@ -182,15 +183,16 @@ def main():
         return
 
     if args.test_webhook:
-        test_webhook_connection()
-        return
+        sys.exit(0 if test_webhook_connection() else 1)
 
     if args.schedule:
         start_scheduler(force=args.force, headless=headless_override)
         return
 
-    # Default action: run once
-    run_sync_pipeline(force=args.force, dry_run=args.dry_run, headless=headless_override)
+    # Default action: run once. Exit non-zero on failure so GitHub Actions marks the run
+    # as failed and uploads the debug screenshot (e.g. expired LinkedIn session).
+    ok = run_sync_pipeline(force=args.force, dry_run=args.dry_run, headless=headless_override)
+    sys.exit(0 if ok else 1)
 
 
 if __name__ == "__main__":
